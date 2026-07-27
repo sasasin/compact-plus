@@ -52,6 +52,21 @@ Recovery delivery differs per thread kind on Codex. `SessionStart(source=compact
 - Do not write machine-specific absolute paths into git-tracked files.
 - Use `${CLAUDE_PLUGIN_ROOT}`, `${HOME}`, `${TMPDIR:-/tmp}`, and repository-relative paths.
 
+## Commit message language
+
+Commit messages in this repository are written in English. The marker file
+`.commit-lang-en` at the repository root declares this, and
+`.githooks/commit-msg` rejects any commit whose message contains Japanese
+text. Comment lines and everything after the `--verbose` scissors line are
+excluded from the check.
+
+The hook is tracked in the repository but git does not enable it
+automatically. Run this once per clone:
+
+```
+git config core.hooksPath .githooks
+```
+
 ## Version bump policy
 
 Every commit must bump the plugin version, following semver. Commits without a

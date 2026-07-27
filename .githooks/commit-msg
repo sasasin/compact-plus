@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# commit-msg hook: `.commit-lang-en` がある repo では commit message に日本語を書かせない。
+#
+# この repo の commit message は英語で統一している。判定は marker file の有無で行うので、
+# marker を消せば hook は素通しになる。
+#
+# 有効化 (clone 直後に 1 度だけ実行する):
+#   git config core.hooksPath .githooks
+set -euo pipefail
+
+MSG_FILE="${1:?commit-msg hook requires the message file path}"
+REPO_TOP="$(git rev-parse --show-toplevel)"
+
+[[ -f "$REPO_TOP/.commit-lang-en" ]] || exit 0
+
+python3 - "$MSG_FILE" <<'PY'
+import re
+import sys
+
+# git が commit 時に捨てる部分 (コメント行と scissors 以降) は検査対象から外す。
+CJK = re.compile(r"[ぁ-んァ-ヶ一-龠々〆〤ー]")
+SCISSORS = "# ------------------------ >8 ------------------------"
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    raw = handle.read()
+
+if SCISSORS in raw:
+    raw = raw.split(SCISSORS, 1)[0]
+
+offenders = [
+    (number, line)
+    for number, line in enumerate(raw.split("\n"), start=1)
+    if not line.startswith("#") and CJK.search(line)
+]
+
+if not offenders:
+    sys.exit(0)
+
+print(
+    "refusing commit message: this repository declares English commit messages "
+    "via .commit-lang-en, but Japanese text was found:",
+    file=sys.stderr,
+)
+for number, line in offenders:
+    print(f"  line {number}: {line}", file=sys.stderr)
+print(
+    "Rewrite the message in English. Existing history is the reference "
+    "(see `git log --oneline`).",
+    file=sys.stderr,
+)
+sys.exit(1)
+PY
