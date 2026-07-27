@@ -25,6 +25,10 @@ around context compaction.
 | `${TMPDIR:-/tmp}/codex-compacted/<thread_id>` | `compaction-recovery.sh` | `sessionstart-compaction-recovery.sh` | Codex PostCompact marker |
 | `${TMPDIR:-/tmp}/codex-compact-warned/<thread_id>` | `userpromptsubmit-compact-plus-reminder.sh` | reminder / recovery hook | Codex notification cooldown |
 
+Every artifact file name is keyed by `compact_plus_artifact_key` in `scripts/runtime-paths.sh`, which prefers `agent_id` and falls back to `session_id`. Codex sets `session_id` to the identity shared by the root thread and all of its descendants, and adds `agent_id` for a thread-spawn subagent, so keying on `session_id` alone files a subagent's state under the parent and overwrites the parent's own state file. Add new artifact paths through this helper rather than reading `.session_id` directly.
+
+Recovery delivery differs per thread kind on Codex. `SessionStart(source=compact)` is dispatched to root threads only; a thread-spawn subagent gets no start hook after compaction, so `userpromptsubmit-compaction-recovery.sh` also runs for Codex `UserPromptSubmit`. The marker is consumed once, so only one of the two channels injects.
+
 ## External Dependencies
 
 - Session id detection uses `$CLAUDE_CODE_SESSION_ID`, `$CODEX_THREAD_ID`, then `$CODEX_COMPANION_SESSION_ID`.

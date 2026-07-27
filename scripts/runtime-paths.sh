@@ -36,6 +36,19 @@ case "$COMPACT_PLUS_RUNTIME_NAME" in
     ;;
 esac
 
+# Resolve the per-thread key used for every artifact file name.
+#
+# Codex sets session_id to the identity shared by the root thread and all of its
+# descendant threads, and adds agent_id for thread-spawn subagents. Keying on
+# session_id alone stores a subagent's state, transcript backup, and marker under
+# the parent's name, so the child never finds its own state and the parent's state
+# file is overwritten. Prefer agent_id and fall back to session_id.
+#
+# Reads the hook input JSON from $1 and prints the key (empty when both absent).
+compact_plus_artifact_key() {
+  printf '%s' "${1:-}" | jq -r '.agent_id // .session_id // empty' 2>/dev/null || true
+}
+
 export COMPACT_PLUS_RUNTIME_NAME
 export COMPACT_PLUS_STATE_DIR
 export COMPACT_PLUS_OFFSET_DIR

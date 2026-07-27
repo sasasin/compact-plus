@@ -34,7 +34,7 @@ DEFAULT_FALLBACK_BACKEND='tmp=$(mktemp "${TMPDIR:-/tmp}/compact-plus-codex.XXXXX
 FALLBACK_CMD="${COMPACT_PLUS_FALLBACK_BACKEND-$DEFAULT_FALLBACK_BACKEND}"
 
 INPUT=$(cat)
-SESSION_ID=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || true)
+SESSION_ID=$(compact_plus_artifact_key "$INPUT")
 TRANSCRIPT_PATH=$(printf '%s' "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null || true)
 TRIGGER=$(printf '%s' "$INPUT" | jq -r '.trigger // "unknown"' 2>/dev/null || printf 'unknown')
 CUSTOM_INSTRUCTIONS=$(printf '%s' "$INPUT" | jq -r '.custom_instructions // empty' 2>/dev/null || true)

@@ -10,7 +10,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "$SCRIPT_DIR/../scripts/runtime-paths.sh"
 
 INPUT=$(cat)
-SESSION_ID=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || true)
+SESSION_ID=$(compact_plus_artifact_key "$INPUT")
 TRANSCRIPT_PATH=$(printf '%s' "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null || true)
 
 [[ -n "$SESSION_ID" ]] || exit 0

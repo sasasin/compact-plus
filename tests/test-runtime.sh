@@ -110,16 +110,28 @@ test_codex_manifest() {
 
   assert_file "$manifest" "Codex plugin manifest exists"
   assert_file "$marketplace" "Codex marketplace exists"
+
+  # The Claude plugin manifest owns the version; every other manifest must agree.
+  # Deriving it here keeps the assertion meaningful across version bumps instead of
+  # failing on the bump itself.
+  local expected
+  expected=$(jq -r '.version // empty' "$ROOT/.claude-plugin/plugin.json" 2>/dev/null)
+  if [[ -z "$expected" ]]; then
+    fail "Claude plugin manifest declares a version"
+    return
+  fi
+
   if [[ -f "$manifest" ]]; then
-    jq -e '.name == "compact-plus" and .version == "1.1.0"' "$manifest" >/dev/null 2>&1 \
-      || fail "Codex plugin manifest has compact-plus version 1.1.0"
+    jq -e --arg v "$expected" '.name == "compact-plus" and .version == $v' "$manifest" >/dev/null 2>&1 \
+      || fail "Codex plugin manifest has compact-plus version $expected"
   fi
   if [[ -f "$marketplace" ]]; then
-    jq -e '.plugins[0].name == "compact-plus" and .plugins[0].version == "1.1.0"' "$marketplace" >/dev/null 2>&1 \
-      || fail "Codex marketplace has compact-plus version 1.1.0"
+    jq -e --arg v "$expected" '.plugins[0].name == "compact-plus" and .plugins[0].version == $v' "$marketplace" >/dev/null 2>&1 \
+      || fail "Codex marketplace has compact-plus version $expected"
   fi
-  jq -e '.version == "1.1.0"' "$ROOT/.claude-plugin/plugin.json" >/dev/null 2>&1 \
-    || fail "Claude plugin version is 1.1.0"
+  jq -e --arg v "$expected" '.metadata.version == $v and .plugins[0].version == $v' \
+    "$ROOT/.claude-plugin/marketplace.json" >/dev/null 2>&1 \
+    || fail "Claude marketplace agrees with plugin version $expected"
   jq -e '.hooks.SessionStart[] | select(.matcher == "compact")' "$ROOT/hooks/hooks.json" >/dev/null 2>&1 \
     || fail "SessionStart compact recovery hook is registered"
 }
@@ -308,6 +320,87 @@ test_codex_recovery_is_one_shot() {
   assert_empty "$output" "Codex recovery is one-shot"
 }
 
+test_codex_subagent_keys_on_agent_id() {
+  local input output backend rollout
+  backend="$TEST_ROOT/subagent-backend.sh"
+  rollout="$TEST_ROOT/subagent.jsonl"
+  make_state_backend "$backend"
+  write_rollout "$rollout" "child-thread" 500 1000
+
+  # Codex passes session_id = root thread id and agent_id = this subagent's own
+  # thread id. Artifacts must be keyed on the subagent, otherwise the child has no
+  # state of its own and the parent's state file is overwritten.
+  input=$(jq -nc --arg path "$rollout" '{
+    session_id: "root-thread",
+    agent_id: "child-thread",
+    agent_type: "coder",
+    transcript_path: $path,
+    trigger: "auto",
+    hook_event_name: "PreCompact"
+  }')
+
+  COMPACT_PLUS_RUNTIME=codex \
+    COMPACT_PLUS_PRIMARY_BACKEND="bash \"$backend\"" \
+    COMPACT_PLUS_FALLBACK_BACKEND="" \
+    "$ROOT/hooks/precompact-state-summary.sh" <<< "$input"
+  assert_file "$TMPDIR/codex-compact-state/child-thread.md" "Subagent state uses the subagent thread id"
+  assert_not_file "$TMPDIR/codex-compact-state/root-thread.md" "Subagent state does not overwrite the root thread state"
+
+  COMPACT_PLUS_RUNTIME=codex "$ROOT/hooks/precompact-transcript-backup.sh" <<< "$input"
+  if ! find "$CODEX_HOME/backups/transcripts" -type f -name '*-child-thread.jsonl' -print -quit 2>/dev/null | grep -q .; then
+    fail "Subagent transcript backup is named after the subagent thread"
+  fi
+  if find "$CODEX_HOME/backups/transcripts" -type f -name '*-root-thread.jsonl' -print -quit 2>/dev/null | grep -q .; then
+    fail "Subagent transcript backup is not named after the root thread"
+  fi
+
+  input=$(jq -nc '{
+    session_id: "root-thread",
+    agent_id: "child-thread",
+    agent_type: "coder",
+    hook_event_name: "PostCompact",
+    trigger: "auto"
+  }')
+  COMPACT_PLUS_RUNTIME=codex "$ROOT/hooks/compaction-recovery.sh" <<< "$input"
+  assert_file "$TMPDIR/codex-compacted/child-thread" "Subagent PostCompact marker uses the subagent thread id"
+  assert_not_file "$TMPDIR/codex-compacted/root-thread" "Subagent PostCompact marker does not claim the root thread"
+
+  # Codex dispatches no start hook to a subagent after compaction, so recovery has
+  # to arrive on the next prompt.
+  input=$(jq -nc '{
+    session_id: "root-thread",
+    agent_id: "child-thread",
+    agent_type: "coder",
+    hook_event_name: "UserPromptSubmit"
+  }')
+  output=$(COMPACT_PLUS_RUNTIME=codex "$ROOT/hooks/userpromptsubmit-compaction-recovery.sh" <<< "$input")
+  assert_contains "$output" '"hookEventName": "UserPromptSubmit"' "Subagent recovery arrives through UserPromptSubmit"
+  assert_contains "$output" "$TMPDIR/codex-compact-state/child-thread.md" "Subagent recovery references the subagent state file"
+  assert_not_file "$TMPDIR/codex-compacted/child-thread" "Subagent recovery consumes the marker"
+
+  output=$(COMPACT_PLUS_RUNTIME=codex "$ROOT/hooks/userpromptsubmit-compaction-recovery.sh" <<< "$input")
+  assert_empty "$output" "Subagent recovery is one-shot"
+}
+
+test_codex_root_thread_recovers_once() {
+  local input session_input output
+  mkdir -p "$TMPDIR/codex-compact-state"
+  printf '# Compact Prep State\n## Recovery Notes\nRoot thread recovery\n' \
+    > "$TMPDIR/codex-compact-state/root-once.md"
+
+  input='{"session_id":"root-once","hook_event_name":"PostCompact","trigger":"auto"}'
+  COMPACT_PLUS_RUNTIME=codex "$ROOT/hooks/compaction-recovery.sh" <<< "$input"
+
+  session_input='{"session_id":"root-once","hook_event_name":"SessionStart","source":"compact"}'
+  output=$(COMPACT_PLUS_RUNTIME=codex "$ROOT/hooks/sessionstart-compaction-recovery.sh" <<< "$session_input")
+  assert_contains "$output" '"hookEventName": "SessionStart"' "Root thread still recovers at SessionStart"
+
+  # Enabling the Codex UserPromptSubmit channel must not inject a second time.
+  input='{"session_id":"root-once","hook_event_name":"UserPromptSubmit"}'
+  output=$(COMPACT_PLUS_RUNTIME=codex "$ROOT/hooks/userpromptsubmit-compaction-recovery.sh" <<< "$input")
+  assert_empty "$output" "Root thread does not recover twice through UserPromptSubmit"
+}
+
 test_codex_manifest
 test_session_id_priority
 test_runtime_auto_detection
@@ -317,6 +410,8 @@ test_runtime_path_separation
 test_state_generation_fails_open
 test_claude_recovery_regression
 test_codex_recovery_is_one_shot
+test_codex_subagent_keys_on_agent_id
+test_codex_root_thread_recovers_once
 
 if [[ "$FAILURES" -ne 0 ]]; then
   printf '%s test assertion(s) failed\n' "$FAILURES" >&2

@@ -66,6 +66,10 @@ Manual and automatic compaction follow the same Codex hook sequence:
 3. Codex's built-in compact summary continues the thread immediately.
 4. On the next turn, `SessionStart(source=compact)` consumes the marker and adds the external state path, optional plan path, original-source reminder, and skill-recovery guidance through `additionalContext`.
 
+"Current thread id" above is `agent_id` when hook input carries it and `session_id` otherwise. Codex sets `session_id` to the identity shared by the root thread and all of its descendants, and adds `agent_id` for a thread-spawn subagent, so a subagent keyed on `session_id` alone would store its state under the parent and overwrite the parent's own state file.
+
+Step 4 applies to root threads only. Codex dispatches `SessionStart(source=compact)` to a thread-spawn subagent's start only when the start source is `Startup`; after compaction the subagent receives no start hook at all. Its recovery therefore arrives through the next `UserPromptSubmit`, which does run for subagents because parent messages are delivered as user input. Both channels read the same one-shot marker, so exactly one of them injects.
+
 The Codex notification does not depend on Claude Code's statusline marker. On each eligible prompt, compact-plus reads the latest usable `token_count` event from the final 500 transcript records after verifying that the rollout's `session_meta.id` equals the hook input's `session_id`. A missing transcript, an unreadable or mismatched `session_meta`, or no usable `token_count` event in those records produces no notification. A newer unusable event does not discard an earlier usable event in the same range.
 
 Codex's displayed context includes a fixed 12,000-token baseline in the checked runtime. compact-plus uses the same effective-window basis:
@@ -124,7 +128,7 @@ compact-plus does not touch either compaction prompt. It places structured state
 6. The state file is written to the runtime-specific state directory.
 7. `PostCompact` starts.
 8. `compaction-recovery.sh` writes the runtime-specific marker and removes its warning cooldown marker.
-9. Claude recovers on the next `UserPromptSubmit`; Codex recovers through `SessionStart(source=compact)` on the next turn. The recovery hook injects:
+9. Claude recovers on the next `UserPromptSubmit`; a Codex root thread recovers through `SessionStart(source=compact)` on the next turn, and a Codex thread-spawn subagent recovers on its next `UserPromptSubmit` because no start hook reaches it after compaction. The recovery hook injects:
    - state file path,
    - active plan path when present,
    - original-source factual note,

@@ -168,6 +168,7 @@ When you pass natural-language instructions, such as `/compact keep the importan
 3. **Recovery hook**
    - `userpromptsubmit-compaction-recovery.sh` consumes the recovery marker and injects state file and plan file references, plus a factual note that memory, rule, and skill mentions in the compact summary are summaries and that the original files remain authoritative
    - Codex calls `sessionstart-compaction-recovery.sh` for `SessionStart(source=compact)`; built-in summary continuity remains responsible for the immediate compact continuation, and compact-plus external state is added on the next turn
+   - Codex dispatches that start hook to root threads only. A thread-spawn subagent receives no start hook after compaction, so its recovery arrives through the next `UserPromptSubmit` instead; parent messages reach a subagent as user input. The marker is consumed once, so a root thread that already recovered at `SessionStart` is a no-op on the following prompt
    - If the state file has `## Skills Invoked`, the hook also injects guidance for rereading the relevant skills
    - `userpromptsubmit-compact-plus-reminder.sh` consumes warn markers and injects a lightweight notification plus a three-line state recitation when available
 4. **SessionStart hook**
@@ -204,6 +205,8 @@ State files start with `# Compact Prep State` and use the same 10-section order 
 | `${TMPDIR}/codex-compact-state/<thread_id>.md` | `precompact-state-summary.sh` / `/compact-plus` skill | Codex recovery hook / agent | Codex pre-compaction state |
 | `${TMPDIR}/codex-compacted/<thread_id>` | `compaction-recovery.sh` | `sessionstart-compaction-recovery.sh` | Codex one-shot recovery marker |
 | `${TMPDIR}/codex-compact-warned/<thread_id>` | reminder hook | reminder / recovery hook | Codex notification cooldown |
+
+On Codex, `<thread_id>` is the thread that actually compacted. Hook input carries `session_id` as the identity shared by the root thread and all of its descendants, plus `agent_id` for a thread-spawn subagent, so every artifact is keyed on `agent_id` when present and on `session_id` otherwise (`compact_plus_artifact_key` in `scripts/runtime-paths.sh`). Keying on `session_id` alone would file a subagent's state under the parent and overwrite the parent's own state file.
 
 ## Architecture
 

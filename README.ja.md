@@ -170,6 +170,7 @@ Claude CodeとCodexは別設定を使う。
    - state file に `## Skills Invoked` があれば、skill 一覧の参照案内も追加する
    - `userpromptsubmit-compact-plus-reminder.sh` が warn marker 検知時に軽い notification と state 3 行 recitation を additionalContext に注入する
    - Codexは`SessionStart(source=compact)`で`sessionstart-compaction-recovery.sh`を呼ぶ。compact直後の継続はbuilt-in summaryが担い、compact-plusの外部stateは次turnで追加される
+   - Codexがこのstart hookを配送するのはroot threadだけである。親がspawnしたsubagentには圧縮後のstart hookが来ないため、復旧は次の`UserPromptSubmit`で届く (親からの送信はsubagentにはuser inputとして入る)。markerは1度で消費されるので、`SessionStart`で復旧済みのroot threadは次のpromptでは何もしない
 4. **手動 fallback (`/compact-plus` skill)**
    - agent 自身が SKILL.md の 10 見出し手順に従って state file を書く
 
@@ -202,6 +203,8 @@ Claude CodeとCodexは別設定を使う。
 | `${TMPDIR}/codex-compact-state/<thread_id>.md` | `precompact-state-summary.sh` / `/compact-plus` skill | Codex recovery hook / agent | Codex圧縮前state |
 | `${TMPDIR}/codex-compacted/<thread_id>` | `compaction-recovery.sh` | `sessionstart-compaction-recovery.sh` | Codex one-shot recovery marker |
 | `${TMPDIR}/codex-compact-warned/<thread_id>` | reminder hook | reminder / recovery hook | Codex通知cooldown |
+
+Codexの`<thread_id>`は実際に圧縮したthreadを指す。hook入力の`session_id`はroot threadと全子孫で共有するidで、親がspawnしたsubagentにはさらに`agent_id`が付く。そのため成果物のキーは`agent_id`があればそれを使い、無い時だけ`session_id`を使う (`scripts/runtime-paths.sh`の`compact_plus_artifact_key`)。`session_id`だけで名前を付けると、subagentのstateが親の名前で保存され、親のstate fileを上書きしてしまう。
 
 ## Architecture
 

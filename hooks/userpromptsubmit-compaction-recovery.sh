@@ -12,7 +12,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "$SCRIPT_DIR/../scripts/runtime-paths.sh"
 
 INPUT=$(cat)
-SESSION_ID=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
+SESSION_ID=$(compact_plus_artifact_key "$INPUT")
 [[ -z "$SESSION_ID" ]] && exit 0
 
 HOOK_EVENT=$(printf '%s' "$INPUT" | jq -r '.hook_event_name // empty' 2>/dev/null)
@@ -22,9 +22,13 @@ if [[ "$EXPECTED_EVENT" == "SessionStart" ]]; then
   [[ "$COMPACT_PLUS_RUNTIME_NAME" == "codex" ]] || exit 0
   SOURCE=$(printf '%s' "$INPUT" | jq -r '.source // empty' 2>/dev/null)
   [[ "$SOURCE" == "compact" ]] || exit 0
-elif [[ "$COMPACT_PLUS_RUNTIME_NAME" == "codex" ]]; then
-  exit 0
 fi
+# Codex UserPromptSubmit is also a delivery channel, not only Claude Code.
+# Codex dispatches SessionStart(source=compact) for root threads only; a
+# thread-spawn subagent gets no start hook after compaction, so its recovery has
+# to ride on the next prompt instead. Parent messages reach a subagent as user
+# input, so this hook runs there. The marker is consumed once, so a root thread
+# that already recovered at SessionStart falls through as a no-op here.
 
 # Do nothing when the marker file is absent.
 MARKER_DIR="$COMPACT_PLUS_MARKER_DIR"

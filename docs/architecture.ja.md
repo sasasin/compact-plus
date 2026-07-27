@@ -68,6 +68,10 @@ manual compactとauto compactionは同じCodex hook sequenceを通る。
 3. compact直後の継続はCodex標準のcompact summaryが担う。
 4. 次turnの`SessionStart(source=compact)`がmarkerをconsumeし、外部state path、任意のplan path、原文再読 reminder、skill recovery guidanceを`additionalContext`へ追加する。
 
+上の「現在のthread id」は、hook入力に`agent_id`があればその値、無ければ`session_id`である。Codexの`session_id`はroot threadと全子孫で共有するidで、親がspawnしたsubagentにはさらに`agent_id`が付く。`session_id`だけでキーを作ると、subagentのstateが親の名前で保存され、親のstate fileを上書きしてしまう。
+
+手順4はroot threadだけに当てはまる。Codexがthread-spawn subagentへstart hookを配送するのはstart sourceが`Startup`の時だけで、圧縮後のsubagentにはstart hookが来ない。そのためsubagentの復旧は次の`UserPromptSubmit`で届く (親からの送信はsubagentにuser inputとして入るのでこのhookは動く)。どちらの経路も同じone-shot markerを読むので、注入するのは一方だけになる。
+
 Codex通知はClaude Codeのstatusline markerに依存しない。
 compact-plusは対象promptごとに現在transcriptの末尾500 recordから最新の利用可能な`token_count` eventを読み、rolloutの`session_meta.id`とhook inputの`session_id`が一致することを先に確認する。
 transcript欠損、`session_meta`の読取不能またはthread id不一致、末尾500 record内に利用可能な`token_count` eventがない場合は通知しない。
@@ -134,7 +138,7 @@ compact-plusはどちらのcompaction promptにも手を入れず、構造化sta
 6. state fileをruntime別state directoryへ書く。
 7. `PostCompact` が開始する。
 8. `compaction-recovery.sh`がruntime別markerを書き、warn cooldown markerを削除する。
-9. Claudeは次の`UserPromptSubmit`、Codexは次turnの`SessionStart(source=compact)`でmarkerをconsumeし、以下を注入する。
+9. Claudeは次の`UserPromptSubmit`、Codexのroot threadは次turnの`SessionStart(source=compact)`、Codexのthread-spawn subagentは次の`UserPromptSubmit` (圧縮後にstart hookが来ないため) でmarkerをconsumeし、以下を注入する。
    - state file path
    - active plan path があればその path
    - original-source factual note

@@ -14,7 +14,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "$SCRIPT_DIR/../scripts/runtime-paths.sh"
 
 INPUT=$(cat)
-SESSION_ID=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
+SESSION_ID=$(compact_plus_artifact_key "$INPUT")
 [[ -z "$SESSION_ID" ]] && exit 0
 
 WARN_DIR="$COMPACT_PLUS_WARN_DIR"

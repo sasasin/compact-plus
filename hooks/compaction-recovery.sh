@@ -1,7 +1,9 @@
 #!/bin/bash
 # PostCompact hook (matcher: ""): record compaction with a marker file.
-# PostCompact does not support additionalContext output, so context injection
-# is handled by UserPromptSubmit on Claude Code and SessionStart on Codex.
+# PostCompact does not support additionalContext output, so context injection is
+# handled by UserPromptSubmit on Claude Code, and on Codex by
+# SessionStart(source=compact) for root threads plus UserPromptSubmit for
+# thread-spawn subagents, which get no start hook after compaction.
 #
 # fail-open (always exit 0)
 
@@ -12,7 +14,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "$SCRIPT_DIR/../scripts/runtime-paths.sh"
 
 INPUT=$(cat)
-SESSION_ID=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
+SESSION_ID=$(compact_plus_artifact_key "$INPUT")
 [[ -z "$SESSION_ID" ]] && exit 0
 
 # Write the marker file. The runtime-specific recovery hook consumes it once.
