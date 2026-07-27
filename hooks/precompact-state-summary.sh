@@ -27,7 +27,10 @@ COMPACT_PLUS_SQUASH_READ_LINES="${COMPACT_PLUS_SQUASH_READ_LINES:-100}"
 COMPACT_PLUS_SQUASH_BASH_CHARS="${COMPACT_PLUS_SQUASH_BASH_CHARS:-500}"
 COMPACT_PLUS_TWO_PASS="${COMPACT_PLUS_TWO_PASS:-1}"
 COMPACT_PLUS_RAW_DELTA_FACTOR="${COMPACT_PLUS_RAW_DELTA_FACTOR:-20}"
-COMPACT_PLUS_BACKEND_TIMEOUT="${COMPACT_PLUS_BACKEND_TIMEOUT:-180}"
+# hooks.json は本 hook 全体に 180 秒を与える。primary と fallback は直列に走るので、
+# 個々の上限を 180 秒にすると primary が固まった時点で hook ごと kill され fallback に
+# 到達できない。両方を試したうえで前処理の余地も残る値にする。
+COMPACT_PLUS_BACKEND_TIMEOUT="${COMPACT_PLUS_BACKEND_TIMEOUT:-80}"
 
 DEFAULT_PRIMARY_BACKEND='claude -p --model claude-sonnet-5 --effort medium --permission-mode dontAsk --output-format text --no-session-persistence --system-prompt "$SYSTEM_PROMPT"'
 PRIMARY_CMD="${COMPACT_PLUS_PRIMARY_BACKEND-$DEFAULT_PRIMARY_BACKEND}"

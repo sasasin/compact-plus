@@ -136,8 +136,10 @@ fallback を無効化する例:
 | `COMPACT_PLUS_TRANSCRIPT_TAIL_TURNS` | `25` | tail 側で切り出す turn 数 |
 | `COMPACT_PLUS_TRANSCRIPT_HEAD_KB` | `10` | head 側 byte cap (KB) |
 | `COMPACT_PLUS_TRANSCRIPT_TAIL_KB` | `40` | tail 側 byte cap (KB) |
+| `COMPACT_PLUS_RAW_DELTA_FACTOR` | `20` | incremental で squash 前に読む raw 差分の上限 (`TAIL_KB * N`)。`0` で無制限 |
 | `COMPACT_PLUS_INCREMENTAL_REFRESH` | `10` | N 回に 1 回全再構築。`0` で無効 |
 | `COMPACT_PLUS_MAX_OUTPUT_TOKENS` | `4096` | LLM 出力上限。backend が参照する場合に使う |
+| `COMPACT_PLUS_BACKEND_TIMEOUT` | `80` | backend 1 つあたりの timeout (秒)。primary と fallback は hook 全体の 180 秒の中で直列に走る。`0` で無効 |
 | `COMPACT_PLUS_SQUASH_ENABLED` | `1` | tool_result squash on/off |
 | `COMPACT_PLUS_SQUASH_READ_LINES` | `100` | Read tool `> N` 行で `[Read: N lines from path]` に置換 |
 | `COMPACT_PLUS_SQUASH_BASH_CHARS` | `500` | Bash tool `> N` chars で `[Bash: exit code, N chars output]` に置換 |

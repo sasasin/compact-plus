@@ -92,6 +92,110 @@ EOF
   chmod +x "$path"
 }
 
+write_squash_fixture() {
+  local path="$1"
+  local i read_text bash_text
+  read_text=$(awk 'BEGIN { for (i = 1; i <= 150; i++) printf "read line %d\n", i }')
+  bash_text=$(awk 'BEGIN { for (i = 1; i <= 60; i++) printf "bash output chunk %d\n", i }')
+  : > "$path"
+  # squash の各分岐 (Read / Bash / function_call_output / 素通し / JSON として読めない行)
+  # を head 側と tail 側の両方に散らす。
+  for i in $(seq 1 40); do
+    case $((i % 5)) in
+      0) jq -nc --arg t "$read_text" '{type:"user", tool_name:"Read", content:$t}' >> "$path" ;;
+      1) jq -nc --argjson n "$i" '{type:"user", message:{content:[{type:"text", text:"turn \($n)"}]}}' >> "$path" ;;
+      2) jq -nc --arg t "$bash_text" '{type:"assistant", tool_name:"Bash", exit_code:0, content:$t}' >> "$path" ;;
+      3) printf 'this line is not valid json %s\n' "$i" >> "$path" ;;
+      4) jq -nc --arg t "$bash_text" '{payload:{type:"function_call_output"}, content:$t}' >> "$path" ;;
+    esac
+  done
+}
+
+make_squash_probe() {
+  local path="$1"
+  cat > "$path" <<'EOF'
+#!/usr/bin/env bash
+# Compare the current slice-then-squash implementation against the previous
+# squash-then-slice one. They agree only while squashing stays per line and
+# order preserving, which is exactly what lets the hook read just the head and
+# tail lines instead of the whole transcript.
+set -uo pipefail
+
+HOOK="$1"
+FIXTURE="$2"
+
+COMPACT_PLUS_SQUASH_ENABLED=1
+COMPACT_PLUS_SQUASH_READ_LINES=100
+COMPACT_PLUS_SQUASH_BASH_CHARS=500
+COMPACT_PLUS_TRANSCRIPT_HEAD_TURNS=5
+COMPACT_PLUS_TRANSCRIPT_TAIL_TURNS=25
+COMPACT_PLUS_TRANSCRIPT_HEAD_KB=10
+COMPACT_PLUS_TRANSCRIPT_TAIL_KB=40
+
+# The hook reads stdin and runs to completion when sourced, so take only its
+# top-level function definitions.
+FUNCS=$(mktemp "${TMPDIR:-/tmp}/compact-plus-funcs.XXXXXX")
+awk '
+  /^[a-z_]+\(\) \{$/ { inside = 1 }
+  inside { print }
+  inside && /^\}$/ { inside = 0 }
+' "$HOOK" > "$FUNCS"
+# shellcheck source=/dev/null
+source "$FUNCS"
+rm -f "$FUNCS"
+
+legacy_head_tail() {
+  local path="$1"
+  local processed head_part tail_part
+  processed=$(mktemp "${TMPDIR:-/tmp}/compact-plus-legacy.XXXXXX")
+  process_transcript_stream < "$path" > "$processed"
+  head_part=$(head -n "$COMPACT_PLUS_TRANSCRIPT_HEAD_TURNS" "$processed" | cap_bytes "$COMPACT_PLUS_TRANSCRIPT_HEAD_KB" head)
+  tail_part=$(tail -n "$COMPACT_PLUS_TRANSCRIPT_TAIL_TURNS" "$processed" | cap_bytes "$COMPACT_PLUS_TRANSCRIPT_TAIL_KB" tail)
+  rm -f "$processed"
+  printf 'Transcript head (%s turns max):\n%s\n\nTranscript tail (%s turns max):\n%s\n' \
+    "$COMPACT_PLUS_TRANSCRIPT_HEAD_TURNS" "$head_part" "$COMPACT_PLUS_TRANSCRIPT_TAIL_TURNS" "$tail_part"
+}
+
+legacy_tail() {
+  local path="$1"
+  local processed
+  processed=$(mktemp "${TMPDIR:-/tmp}/compact-plus-legacy.XXXXXX")
+  process_transcript_stream < "$path" > "$processed"
+  tail -n "$COMPACT_PLUS_TRANSCRIPT_TAIL_TURNS" "$processed" | cap_bytes "$COMPACT_PLUS_TRANSCRIPT_TAIL_KB" tail
+  rm -f "$processed"
+}
+
+if [[ "$(semantic_head_tail "$FIXTURE")" == "$(legacy_head_tail "$FIXTURE")" ]]; then
+  printf 'head-tail: same\n'
+else
+  printf 'head-tail: differs\n'
+fi
+
+if [[ "$(semantic_tail "$FIXTURE")" == "$(legacy_tail "$FIXTURE")" ]]; then
+  printf 'tail: same\n'
+else
+  printf 'tail: differs\n'
+fi
+
+in_lines=$(wc -l < "$FIXTURE" | tr -d ' ')
+out_lines=$(process_transcript_stream < "$FIXTURE" | wc -l | tr -d ' ')
+printf 'line-count: %s/%s\n' "$out_lines" "$in_lines"
+EOF
+}
+
+test_squash_slicing_is_order_independent() {
+  local fixture="$TEST_ROOT/squash-fixture.jsonl"
+  local probe="$TEST_ROOT/squash-probe.sh"
+  local output
+  write_squash_fixture "$fixture"
+  make_squash_probe "$probe"
+
+  output=$(bash "$probe" "$ROOT/hooks/precompact-state-summary.sh" "$fixture")
+  assert_contains "$output" "line-count: 40/40" "Squashing emits exactly one line per input line"
+  assert_contains "$output" "head-tail: same" "Slicing before squashing leaves semantic_head_tail output unchanged"
+  assert_contains "$output" "tail: same" "Slicing before squashing leaves semantic_tail output unchanged"
+}
+
 test_claude_warning_threshold_is_independent() {
   local input output
   mkdir -p "$TMPDIR/claude-compact-warn"
@@ -584,6 +688,7 @@ test_codex_root_thread_recovers_once() {
 }
 
 test_codex_manifest
+test_squash_slicing_is_order_independent
 test_session_id_priority
 test_runtime_auto_detection
 test_claude_warning_threshold_is_independent
