@@ -70,13 +70,16 @@ git config core.hooksPath .githooks
 ## Version bump policy
 
 Every commit must bump the plugin version, following semver. Commits without a
-version bump are not allowed. Keep the following three slots in sync at the
+version bump are not allowed. Keep the following six slots in sync at the
 same value — the `Check version consistency` step in `.github/workflows/test.yml`
 enforces this and will fail CI on any mismatch:
 
 1. `.claude-plugin/plugin.json` (`version`)
 2. `.claude-plugin/marketplace.json` (`metadata.version`)
 3. `.claude-plugin/marketplace.json` (`plugins[0].version`)
+4. `.codex-plugin/plugin.json` (`version`)
+5. `.agents/plugins/marketplace.json` (`metadata.version`)
+6. `.agents/plugins/marketplace.json` (`plugins[0].version`)
 
 | Change type | Bump | Example |
 |-------------|------|---------|
