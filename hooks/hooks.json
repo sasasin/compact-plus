@@ -7,7 +7,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/userpromptsubmit-compaction-recovery.sh\"",
-            "timeout": 5000
+            "timeout": 5
           }
         ]
       },
@@ -17,7 +17,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/userpromptsubmit-compact-plus-reminder.sh\"",
-            "timeout": 3000
+            "timeout": 3
           }
         ]
       }
@@ -29,7 +29,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/precompact-transcript-backup.sh\"",
-            "timeout": 30000
+            "timeout": 30
           }
         ]
       },
@@ -39,7 +39,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/precompact-state-summary.sh\"",
-            "timeout": 180000
+            "timeout": 180
           }
         ]
       }
@@ -51,7 +51,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/compaction-recovery.sh\"",
-            "timeout": 5000
+            "timeout": 5
           }
         ]
       }
@@ -63,7 +63,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/sessionstart-compaction-recovery.sh\"",
-            "timeout": 5000
+            "timeout": 5
           }
         ]
       },
@@ -73,7 +73,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/sessionstart-export-session-id.sh\"",
-            "timeout": 3000
+            "timeout": 3
           }
         ]
       }
