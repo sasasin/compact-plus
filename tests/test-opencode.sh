@@ -99,8 +99,9 @@ EOF
 }
 
 # One OpenCode message: {info, parts}. parts must be valid JSON.
+# The object value needs parentheses: jq rejects `"m" + (...)` without them.
 msg() {
-  jq -nc --arg role "$1" --argjson parts "$2" '{info: {role: $role, id: "m" + ($parts | tostring)}, parts: $parts}'
+  jq -nc --arg role "$1" --argjson parts "$2" '{info: {role: $role, id: ("m" + ($parts | tostring))}, parts: $parts}'
 }
 
 run_core() {
