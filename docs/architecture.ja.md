@@ -109,6 +109,39 @@ Codex ユーザーは無設定でこの handoff 設計の恩恵を受ける。
 
 OpenAI Responses API にも `context_management` と `/responses/compact` endpoint による server-side context compaction がある。この API は encrypted compaction item を返すもので、Claude Code plugin hook とは別の仕組み。
 
+## 3b. OpenCode v1 の compaction surface (v1.18.32 でテスト済み)
+
+OpenCode v1 は command hook ではなく plugin API を公開する。この統合は adapter boundary で、`opencode/plugins/compact-plus.js` は薄い edge、`scripts/opencode-core.sh` がすべての判断を持つ (JS runtime なしでテスト可能)。以下の挙動は v1.18.32 の実行時で確認したもので、plugin API に破壊的変更がなければ v1.18.32 以降の v1 系でも同じ挙動が期待できる。
+
+| surface | compact-plus での意味 |
+|---|---|
+| `experimental.session.compacting` | compaction LLM 呼び出し前に発火。compaction を flag する。受け取る値は `sessionID` のみ |
+| `experimental.chat.messages.transform` | compaction request に messages object を渡す。capture channel。plugin SDK 呼び出しを compaction hook 内から行うと server へ再入して失敗するため、この面を使う |
+| `session.compacted` event | 圧縮成功後に publish。one-shot recovery marker を arm し warn cooldown をリセット |
+| `experimental.chat.system.transform` | 次の model turn での recovery / warning 注入 channel |
+| `command.execute.before` | 呼び出し済み command を Skills Invoked 記録へ追加 |
+| `shell.env` | `OPENCODE_SESSION_ID` と `COMPACT_PLUS_OPENCODE_ROOT` を export |
+
+OpenCode には `transcript_path` hook field がない。source data は session message list (`Array<{info, parts}>`) で、backup artifact はこれを 1 message = 1 行の JSONL に serialize して `${OPENCODE_DATA_DIR:-$HOME/.local/share/opencode}/backups/compact-plus/` に置く (session ごとに新しい 20 件保持)。
+
+実行時で観察した順序:
+
+1. `experimental.session.compacting` が compaction を flag
+2. `experimental.chat.messages.transform` が messages を渡す → core が backup 書き、head/tail/incremental 選択と squash を適用、state prompt 構築
+3. state 生成: shell backend env が設定されていればそれを呼ぶ。無ければ OpenCode ネイティブの決定論的 adapter が state file を書く。compaction hook 内からの nested model call は v1 plugin API で unsafe (server 再入。v1.18.32 で確認) なので、OpenCode default backend は外部 CLI executable に依存しない
+4. `session.compacted` event が marker を arm し cooldown をリセット
+5. event 後の最初の `experimental.chat.system.transform` が marker を consume し recovery をちょうど 1 回注入。後続 turn は静か、2回目の compaction は再び復旧、interrupted された stale marker は次の compaction を永久に抑制しない
+
+warning metric は v1 plugin API の実測値 (v1.18.32 で確認): 直近 assistant message の token usage を model context limit に対して計算 (`COMPACT_PLUS_OPENCODE_WARN_THRESHOLD`、default `75`)。cycle ごとに 1 回、state file があれば 3 行 recitation を添える。
+
+OpenCode storage は `opencode-*` directory を使い、`claude-*` / `codex-*` と衝突しない。成果物は OpenCode `sessionID` でキーする。
+
+OpenCode で parity に届かない点:
+
+- `/compact <text>` の自然文 instruction は plugin API に公開されていないため priority guidance を転送できない
+- OpenCode v1 (v1.18.32 で確認) に durable な plan artifact contract がない。active plan pointer は外部 plan-management hook が `opencode-active-plan/<session_id>` を書く場合のみ尊重し、そうでなければ `## Active Plan` は `Not verified`。`## TaskList Summary` は session todo list を使う
+- 決定論的 default backend は観測事実のみ記録する。意味的な synthesis (decisions / rationale) は LLM backend の設定が必要
+
 ## 4. compact 能力比較
 
 「圧縮を挟んでもセッションを続けられるか」という user 効能の軸で 3 者を比較する (実装手段ではなく効能を行に取っている)。

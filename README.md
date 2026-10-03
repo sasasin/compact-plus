@@ -2,7 +2,7 @@
 
 [Japanese README](./README.ja.md) | [Architecture](./docs/architecture.md)
 
-A transparent Claude Code and Codex plugin that preserves working state around `/compact`. It does not replace either runtime's compaction algorithm; it augments compaction through documented hooks.
+A transparent Claude Code, Codex, and OpenCode plugin that preserves working state around `/compact`. It does not replace any runtime's compaction algorithm; it augments compaction through documented hooks. The OpenCode integration was developed and tested against **OpenCode v1.18.32**; newer v1 releases are expected to work as long as the plugin API has no breaking changes.
 
 ## What It Does
 
@@ -19,7 +19,7 @@ After installation, just run `/compact` as usual. **No additional action is requ
 
 - Both manual `/compact` and auto-compaction trigger the same hook path
 - Before compaction: the PreCompact hook automatically backs up the transcript and generates the 10-section state file
-- After compaction: Claude Code and Codex recover exactly once through `SessionStart(source=compact)` before the first post-compaction prompt
+- After compaction: Claude Code and Codex recover exactly once through `SessionStart(source=compact)` before the first post-compaction prompt. On OpenCode, recovery is injected exactly once on the first model turn after the `session.compacted` event
 - The agent does not need to call any specific skill or perform any preparation
 
 Optional enhancements:
@@ -33,6 +33,12 @@ Optional enhancements:
 - An LLM backend through `claude -p` or `codex exec`
 - The default configuration uses `claude -p --model claude-sonnet-5 --effort medium` as the primary backend and `codex exec --model gpt-5.3-codex-spark` as the fallback backend
 - The Codex Spark fallback assumes ChatGPT Pro access. You can switch the fallback to models such as `gpt-5.4` or `gpt-5.5`
+
+For the OpenCode path:
+
+- OpenCode v1.18.32 (the tested baseline). Newer v1 releases are expected to work as long as the plugin API has no breaking changes
+- `bash`, `jq`, and Unix filesystem semantics
+- **No `claude` or `codex` executable is required.** The OpenCode default backend is the deterministic adapter in `scripts/opencode-core.sh`. If you configure `COMPACT_PLUS_PRIMARY_BACKEND` / `COMPACT_PLUS_FALLBACK_BACKEND`, those shell backends are used instead, so the OpenCode path can also run through any command you provide
 
 ## Installation
 
@@ -56,6 +62,20 @@ codex plugin add compact-plus@compact-plus
 
 Review and trust the hook definitions when Codex prompts.
 Start a new thread after installation so Codex loads the installed plugin and hooks.
+
+### OpenCode
+
+OpenCode loads local plugins from `.opencode/plugins/` (project) or `~/.config/opencode/plugins/` (global). No npm publication or marketplace installation is needed. The tested procedure is a symlink from the cloned repository:
+
+```bash
+mkdir -p ~/.config/opencode/plugins ~/.config/opencode/commands
+ln -s "$HOME/src/github.com/sasasin/compact-plus/opencode/plugins/compact-plus.js" ~/.config/opencode/plugins/compact-plus.js
+ln -s "$HOME/src/github.com/sasasin/compact-plus/opencode/commands/compact-plus.md" ~/.config/opencode/commands/compact-plus.md
+```
+
+Start a new OpenCode session so the plugin is loaded. The plugin resolves the repository root through its own real path, so the symlink must point at the cloned repository. Project-level placement (`<repo>/.opencode/plugins/compact-plus.js`) works the same way.
+
+The manual fallback is the `/compact-plus` command (`opencode/commands/compact-plus.md`); the existing `skills/compact-plus/SKILL.md` is not in an OpenCode-discovered skill path, so symlink it into `~/.config/opencode/skills/compact-plus/SKILL.md` or `.opencode/skills/compact-plus/SKILL.md` if you want the skill form as well.
 
 ### Updating
 
@@ -153,12 +173,17 @@ Claude Code and Codex use separate settings:
 |---|---|---:|---|
 | Claude Code | `COMPACT_WARN_THRESHOLD` | base repository setting | `home/hooks/claude/statusline.sh` writes the marker consumed by this plugin |
 | Codex | `COMPACT_PLUS_CODEX_WARN_THRESHOLD` | `75` | compact-plus reads the latest token-count event from the current thread rollout |
+| OpenCode | `COMPACT_PLUS_OPENCODE_WARN_THRESHOLD` | `75` | compact-plus uses the last assistant message's token usage against the model context limit exposed by the OpenCode v1 plugin API (tested on v1.18.32) |
 
 Both values are context **usage** percentages. Changing one does not change the other. Codex uses the same effective-window basis as its context display by excluding the current 12,000-token fixed baseline. Codex also verifies that the rollout's `session_meta.id` matches the current `session_id`; missing, malformed, or mismatched rollout data produces no notification.
+
+The OpenCode value is `last assistant total tokens / model context limit * 100`, computed from the `message.updated` event and the model limit passed to `experimental.chat.system.transform`. This is a real metric exposed by the v1 plugin API (verified on v1.18.32), not an estimate. The warning fires once per compaction cycle and the cooldown resets when compaction completes.
 
 ### `/compact` Arguments
 
 When you pass natural-language instructions, such as `/compact keep the important design decisions`, compact-plus forwards those instructions to the state-generation LLM as priority guidance.
+
+On the OpenCode v1 plugin API (verified on v1.18.32) this is **not supported**: the plugin API does not expose per-compaction user instructions (`/compact` is not a command-service command, and the compaction hook receives only `sessionID`). The state prompt records this as `(none)`. Put priorities in the conversation or in the state file before compacting.
 
 ## Runtime Flow
 
@@ -177,6 +202,19 @@ When you pass natural-language instructions, such as `/compact keep the importan
    - `sessionstart-export-session-id.sh` writes `export CLAUDE_CODE_SESSION_ID=<id>` to `$CLAUDE_ENV_FILE` so the `/compact-plus` skill can obtain the session id through the bundled `scripts/get-session-id.sh` wrapper without depending on any file outside the plugin
 5. **Manual fallback (`/compact-plus` skill)**
    - The agent follows the `SKILL.md` 10-section procedure and writes the state file manually
+
+### OpenCode flow
+
+OpenCode exposes a different plugin surface, so the OpenCode integration is an adapter, not a port of the Claude/Codex hook scripts. All decisions live in `scripts/opencode-core.sh`; `opencode/plugins/compact-plus.js` is a thin edge adapter.
+
+1. `experimental.session.compacting` marks the compaction in progress. Plugin SDK calls made from inside this hook re-enter the server and fail (verified on v1.18.32), so the adapter does not fetch messages here.
+2. `experimental.chat.messages.transform` delivers the session messages without an API round-trip. During the compaction request the adapter passes them to the core, which writes the session backup, applies the existing head/tail/incremental selection and tool-output squash rules, and builds the state prompt.
+3. State generation: configured shell backends (`COMPACT_PLUS_PRIMARY_BACKEND` / `COMPACT_PLUS_FALLBACK_BACKEND`) are honored unchanged; otherwise the deterministic OpenCode-native adapter writes the 10-section state file. Semantic sections that cannot be derived from observable facts stay `Not verified`.
+4. The `session.compacted` event arms the one-shot recovery marker and resets the warning cooldown.
+5. The first `experimental.chat.system.transform` after the event consumes the marker and injects the recovery payload (state content truncated at 30720 bytes, active plan pointer when present, saved-at staleness note, original-source reminder). Later turns stay quiet; a second compaction recovers again.
+6. `shell.env` exports `OPENCODE_SESSION_ID` and `COMPACT_PLUS_OPENCODE_ROOT` so the manual `/compact-plus` command obtains the real session identity.
+
+OpenCode storage uses `opencode-*` directories and `${OPENCODE_DATA_DIR:-$HOME/.local/share/opencode}/backups/compact-plus/`; it never collides with `claude-*` or `codex-*` paths.
 
 ## State File Sections
 
@@ -209,6 +247,13 @@ State files start with `# Compact Prep State` and use the same 10-section order 
 | `${TMPDIR}/codex-compacted/<thread_id>` | `compaction-recovery.sh` | `sessionstart-compaction-recovery.sh` / `userpromptsubmit-compaction-recovery.sh` | Codex one-shot recovery marker |
 | `${TMPDIR}/codex-compact-injected/<thread_id>` | `sessionstart-compaction-recovery.sh` | `compaction-recovery.sh` | Codex injected mark for the same handshake |
 | `${TMPDIR}/codex-compact-warned/<thread_id>` | reminder hook | reminder / recovery hook | Codex notification cooldown |
+| `${TMPDIR}/opencode-compact-state/<session_id>.md` | `scripts/opencode-core.sh` | recovery injection / agent | OpenCode pre-compaction state |
+| `${TMPDIR}/opencode-compact-state-offset/<session_id>` | `scripts/opencode-core.sh` | `scripts/opencode-core.sh` | OpenCode incremental message offset |
+| `${TMPDIR}/opencode-compact-state-counter/<session_id>` | `scripts/opencode-core.sh` | `scripts/opencode-core.sh` | OpenCode refresh cycle counter |
+| `${TMPDIR}/opencode-compacted/<session_id>` | `scripts/opencode-core.sh` (event) | `scripts/opencode-core.sh` (inject) | OpenCode one-shot recovery marker |
+| `${TMPDIR}/opencode-compact-warned/<session_id>` | `scripts/opencode-core.sh` | reminder / recovery | OpenCode notification cooldown |
+| `${TMPDIR}/opencode-active-plan/<session_id>` | plan-management hook | `scripts/opencode-core.sh` | OpenCode active plan pointer |
+| `${OPENCODE_DATA_DIR:-$HOME/.local/share/opencode}/backups/compact-plus/<epoch>-<session_id>.jsonl` | `scripts/opencode-core.sh` | recovery injection / agent | OpenCode session backup; newest 20 per session retained |
 
 On Codex, `<thread_id>` is the thread that actually compacted. Hook input carries `session_id` as the identity shared by the root thread and all of its descendants, plus `agent_id` for a thread-spawn subagent, so every artifact is keyed on `agent_id` when present and on `session_id` otherwise (`compact_plus_artifact_key` in `scripts/runtime-paths.sh`). Keying on `session_id` alone would file a subagent's state under the parent and overwrite the parent's own state file.
 
@@ -226,4 +271,6 @@ python3 -m json.tool .agents/plugins/marketplace.json >/dev/null
 python3 -m json.tool hooks/hooks.json >/dev/null
 bash -n hooks/*.sh scripts/*.sh tests/*.sh
 bash tests/test-runtime.sh
+bash tests/test-opencode.sh
+bash tests/test-opencode-integration.sh   # requires an OpenCode v1 executable (tested on 1.18.32); skips otherwise
 ```

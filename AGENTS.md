@@ -24,6 +24,15 @@ around context compaction.
 | `${TMPDIR:-/tmp}/codex-compact-state-counter/<thread_id>` | `precompact-state-summary.sh` | `precompact-state-summary.sh` | Codex refresh cycle counter |
 | `${TMPDIR:-/tmp}/codex-compacted/<thread_id>` | `compaction-recovery.sh` | `sessionstart-compaction-recovery.sh` | Codex PostCompact marker |
 | `${TMPDIR:-/tmp}/codex-compact-warned/<thread_id>` | `userpromptsubmit-compact-plus-reminder.sh` | reminder / recovery hook | Codex notification cooldown |
+| `${TMPDIR:-/tmp}/opencode-compact-state/<session_id>.md` | `scripts/opencode-core.sh` / OpenCode plugin | recovery injection and agent | OpenCode pre-compaction recovery state |
+| `${TMPDIR:-/tmp}/opencode-compact-state-offset/<session_id>` | `scripts/opencode-core.sh` | `scripts/opencode-core.sh` | OpenCode incremental message offset |
+| `${TMPDIR:-/tmp}/opencode-compact-state-counter/<session_id>` | `scripts/opencode-core.sh` | `scripts/opencode-core.sh` | OpenCode refresh cycle counter |
+| `${TMPDIR:-/tmp}/opencode-compacted/<session_id>` | `scripts/opencode-core.sh` (event handler) | `scripts/opencode-core.sh` (inject) | OpenCode PostCompact marker |
+| `${TMPDIR:-/tmp}/opencode-compact-injected/<session_id>` | `scripts/opencode-core.sh` | `scripts/opencode-core.sh` | OpenCode injected mark |
+| `${TMPDIR:-/tmp}/opencode-compact-warned/<session_id>` | `scripts/opencode-core.sh` | reminder / recovery | OpenCode notification cooldown |
+| `${TMPDIR:-/tmp}/opencode-active-plan/<session_id>` | plan-management hook | `scripts/opencode-core.sh` | OpenCode active plan pointer |
+| `${TMPDIR:-/tmp}/opencode-commands-invoked/<session_id>` | `scripts/opencode-core.sh` | `scripts/opencode-core.sh` | OpenCode invoked-command record |
+| `${OPENCODE_DATA_DIR:-$HOME/.local/share/opencode}/backups/compact-plus/<epoch>-<session_id>.jsonl` | `scripts/opencode-core.sh` | recovery injection and agent | OpenCode session backup (message JSONL) |
 
 Every artifact file name is keyed by `compact_plus_artifact_key` in `scripts/runtime-paths.sh`, which prefers `agent_id` and falls back to `session_id`. Codex sets `session_id` to the identity shared by the root thread and all of its descendants, and adds `agent_id` for a thread-spawn subagent, so keying on `session_id` alone files a subagent's state under the parent and overwrites the parent's own state file. Add new artifact paths through this helper rather than reading `.session_id` directly.
 
@@ -39,6 +48,7 @@ Recovery delivery differs per thread kind on Codex. `SessionStart(source=compact
 ## Hook Scripts
 
 - `sessionstart-export-session-id.sh`: SessionStart hook that appends `export CLAUDE_CODE_SESSION_ID=<id>` to `$CLAUDE_ENV_FILE`, making the session id available to subsequent Bash tool calls and skill scripts inside the same session. Runs on every SessionStart matcher.
+- `scripts/opencode-core.sh`: OpenCode v1 adapter core (developed and tested against v1.18.32; newer v1 releases are expected to work as long as the plugin API has no breaking changes). Holds every compact-plus decision for the OpenCode runtime so it is testable without a JavaScript runtime. `opencode/plugins/compact-plus.js` is a thin edge adapter that feeds OpenCode session data to it as JSON on stdin. Plugin SDK calls made from inside the OpenCode compaction hook re-enter the server and fail, so capture rides on `experimental.chat.messages.transform`; recovery and warning are delivered through `experimental.chat.system.transform`, and the `session.compacted` event arms the one-shot marker.
 - `precompact-transcript-backup.sh`: backs up the transcript to the Claude Code or Codex backup directory during PreCompact.
 - `precompact-state-summary.sh`: generates a state file during PreCompact using incremental transcript reads, semantic head/tail fallback, tool output squash, two-pass prompt metadata, custom `/compact` instructions, and Skills Invoked extraction.
 - `compaction-recovery.sh`: writes a recovery marker during PostCompact and clears the compact warning cooldown.
