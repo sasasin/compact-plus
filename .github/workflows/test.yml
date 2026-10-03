@@ -27,6 +27,12 @@ jobs:
       - name: Run runtime tests
         run: bash tests/test-runtime.sh
 
+      - name: Run OpenCode adapter tests
+        run: bash tests/test-opencode.sh
+
+      - name: Run OpenCode integration test when the runtime is available
+        run: bash tests/test-opencode-integration.sh
+
       - name: Check no tracked symlinks
         run: |
           # project policy: compact-plus は Windows install 対応のため tracked symlink を禁止する

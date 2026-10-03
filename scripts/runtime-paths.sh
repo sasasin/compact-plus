@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 
-# Shared runtime and storage paths for Claude Code and Codex hooks.
+# Shared runtime and storage paths for Claude Code, Codex, and OpenCode hooks.
 # COMPACT_PLUS_RUNTIME is an explicit test/debug override. Codex plugin hooks
-# set PLUGIN_ROOT; Claude Code plugin hooks only set CLAUDE_PLUGIN_ROOT.
+# set PLUGIN_ROOT; Claude Code plugin hooks only set CLAUDE_PLUGIN_ROOT. The
+# OpenCode adapter core is invoked with COMPACT_PLUS_RUNTIME=opencode by the
+# OpenCode plugin, which is the only way the OpenCode path is selected.
 
 if [[ -n "${COMPACT_PLUS_RUNTIME:-}" ]]; then
   COMPACT_PLUS_RUNTIME_NAME="$COMPACT_PLUS_RUNTIME"
@@ -13,6 +15,18 @@ else
 fi
 
 case "$COMPACT_PLUS_RUNTIME_NAME" in
+  opencode)
+    COMPACT_PLUS_STATE_DIR="${TMPDIR:-/tmp}/opencode-compact-state" # lint:allow-os-tmp
+    COMPACT_PLUS_OFFSET_DIR="${TMPDIR:-/tmp}/opencode-compact-state-offset" # lint:allow-os-tmp
+    COMPACT_PLUS_COUNTER_DIR="${TMPDIR:-/tmp}/opencode-compact-state-counter" # lint:allow-os-tmp
+    COMPACT_PLUS_MARKER_DIR="${TMPDIR:-/tmp}/opencode-compacted" # lint:allow-os-tmp
+    COMPACT_PLUS_INJECTED_DIR="${TMPDIR:-/tmp}/opencode-compact-injected" # lint:allow-os-tmp
+    COMPACT_PLUS_WARN_DIR="${TMPDIR:-/tmp}/opencode-compact-warn" # lint:allow-os-tmp
+    COMPACT_PLUS_WARNED_DIR="${TMPDIR:-/tmp}/opencode-compact-warned" # lint:allow-os-tmp
+    COMPACT_PLUS_PLAN_POINTER_DIR="${TMPDIR:-/tmp}/opencode-active-plan" # lint:allow-os-tmp
+    COMPACT_PLUS_COMMANDS_DIR="${TMPDIR:-/tmp}/opencode-commands-invoked" # lint:allow-os-tmp
+    COMPACT_PLUS_BACKUP_DIR="${OPENCODE_DATA_DIR:-${HOME}/.local/share/opencode}/backups/compact-plus"
+    ;;
   codex)
     COMPACT_PLUS_STATE_DIR="${TMPDIR:-/tmp}/codex-compact-state" # lint:allow-os-tmp
     COMPACT_PLUS_OFFSET_DIR="${TMPDIR:-/tmp}/codex-compact-state-offset" # lint:allow-os-tmp
@@ -22,6 +36,7 @@ case "$COMPACT_PLUS_RUNTIME_NAME" in
     COMPACT_PLUS_WARN_DIR="${TMPDIR:-/tmp}/codex-compact-warn" # lint:allow-os-tmp
     COMPACT_PLUS_WARNED_DIR="${TMPDIR:-/tmp}/codex-compact-warned" # lint:allow-os-tmp
     COMPACT_PLUS_PLAN_POINTER_DIR="${TMPDIR:-/tmp}/codex-active-plan" # lint:allow-os-tmp
+    COMPACT_PLUS_COMMANDS_DIR="${TMPDIR:-/tmp}/codex-commands-invoked" # lint:allow-os-tmp
     COMPACT_PLUS_BACKUP_DIR="${CODEX_HOME:-${HOME}/.codex}/backups/transcripts"
     ;;
   claude|*)
@@ -34,6 +49,7 @@ case "$COMPACT_PLUS_RUNTIME_NAME" in
     COMPACT_PLUS_WARN_DIR="${TMPDIR:-/tmp}/claude-compact-warn" # lint:allow-os-tmp
     COMPACT_PLUS_WARNED_DIR="${TMPDIR:-/tmp}/claude-compact-warned" # lint:allow-os-tmp
     COMPACT_PLUS_PLAN_POINTER_DIR="${TMPDIR:-/tmp}/claude-active-plan" # lint:allow-os-tmp
+    COMPACT_PLUS_COMMANDS_DIR="${TMPDIR:-/tmp}/claude-commands-invoked" # lint:allow-os-tmp
     COMPACT_PLUS_BACKUP_DIR="${HOME}/.claude/backups/transcripts"
     ;;
 esac
@@ -60,4 +76,5 @@ export COMPACT_PLUS_INJECTED_DIR
 export COMPACT_PLUS_WARN_DIR
 export COMPACT_PLUS_WARNED_DIR
 export COMPACT_PLUS_PLAN_POINTER_DIR
+export COMPACT_PLUS_COMMANDS_DIR
 export COMPACT_PLUS_BACKUP_DIR

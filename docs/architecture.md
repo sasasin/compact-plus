@@ -2,7 +2,7 @@
 
 [Japanese architecture](./architecture.ja.md) | [README](../README.md) | [Japanese README](../README.ja.md)
 
-compact-plus is a Claude Code and Codex plugin that captures working state around context compaction. It does not replace either compaction implementation. It uses documented hook events to save the source transcript and a structured state summary before compaction, then injects recovery guidance after compaction.
+compact-plus is a Claude Code, Codex, and OpenCode plugin that captures working state around context compaction. It does not replace any runtime's compaction implementation. It uses documented hook events to save the source transcript and a structured state summary before compaction, then injects recovery guidance after compaction. The OpenCode integration was developed and tested against v1.18.32 and follows a different plugin surface, so its lifecycle is described separately in section 3b rather than pretending the hook protocols are identical. Newer v1 releases are expected to work as long as the plugin API has no breaking changes.
 
 ## 1. Goals and Non-Goals
 
@@ -98,6 +98,39 @@ The default compaction prompt shipped by Codex is deliberately handoff-oriented.
 This is the built-in handoff engineering that users of Codex get without any configuration.
 
 The OpenAI Responses API also has server-side context compaction through `context_management` and the `/responses/compact` endpoint. That API returns an encrypted compaction item and is not the same mechanism as Claude Code plugin hooks.
+
+## 3b. OpenCode v1 Compaction Surface (tested on v1.18.32)
+
+OpenCode v1 exposes a plugin API rather than command hooks. The integration is an adapter boundary: `opencode/plugins/compact-plus.js` is a thin edge that reads OpenCode data, and `scripts/opencode-core.sh` holds every compact-plus decision so it is testable without a JavaScript runtime. The behavior below was verified on the v1.18.32 runtime; newer v1 releases are expected to behave the same as long as the plugin API has no breaking changes.
+
+| Surface | Meaning for compact-plus |
+|---|---|
+| `experimental.session.compacting` | Fires before the compaction LLM call. Marks the compaction in progress; it receives only `sessionID` |
+| `experimental.chat.messages.transform` | Delivers the message objects during the compaction request. This is the capture channel, because plugin SDK calls made from inside the compaction hook re-enter the server and fail |
+| `session.compacted` event | Published after a successful compaction. Arms the one-shot recovery marker and resets the warning cooldown |
+| `experimental.chat.system.transform` | Delivery channel for recovery and warning text on the next model turn |
+| `chat.message` / `command.execute.before` | Not used for injection; `command.execute.before` records invoked commands for the Skills Invoked section |
+| `shell.env` | Exports `OPENCODE_SESSION_ID` and `COMPACT_PLUS_OPENCODE_ROOT` for the manual fallback |
+
+There is no `transcript_path` hook field on OpenCode. The source data is the session message list (`Array<{info, parts}>`), and the backup artifact is that list serialized as one message JSON object per line under `${OPENCODE_DATA_DIR:-$HOME/.local/share/opencode}/backups/compact-plus/`, newest 20 per session retained.
+
+Lifecycle ordering observed on the running runtime:
+
+1. `experimental.session.compacting` marks the compaction in progress.
+2. `experimental.chat.messages.transform` delivers the messages; the core writes the backup, applies the existing head/tail/incremental selection and squash rules, and builds the state prompt.
+3. State generation runs through the configured shell backend when `COMPACT_PLUS_PRIMARY_BACKEND` or `COMPACT_PLUS_FALLBACK_BACKEND` is set. Otherwise the deterministic OpenCode-native adapter writes the state file. A nested model call from inside the compaction hook is unsafe on the v1 plugin API (it re-enters the server, verified on v1.18.32), so the OpenCode default backend does not depend on any external CLI executable.
+4. The `session.compacted` event arms the marker and clears the warning cooldown.
+5. The first `experimental.chat.system.transform` after the event consumes the marker and injects the recovery payload exactly once. Repeated turns stay quiet; a second compaction arms a new marker and recovers again. A stale marker from an interrupted compaction is consumed once and does not suppress later compactions.
+
+The warning metric is real on the v1 plugin API (verified on v1.18.32): the last assistant message's token usage against the model context limit, passed through `experimental.chat.system.transform`. `COMPACT_PLUS_OPENCODE_WARN_THRESHOLD` (default `75`) controls the notification point; the warning fires once per compaction cycle and includes the three-line recitation when a state file exists.
+
+OpenCode storage uses `opencode-*` directories and the OpenCode data backup directory, so it never collides with `claude-*` or `codex-*` paths. Artifacts are keyed on the OpenCode `sessionID`.
+
+Known OpenCode parity gaps:
+
+- Per-compaction natural-language instructions (`/compact <text>`) are not exposed through the plugin API, so priority guidance cannot be forwarded on this runtime.
+- OpenCode v1 (checked on v1.18.32) has no durable plan artifact contract. The active-plan pointer is honored only when an external plan-management hook writes `opencode-active-plan/<session_id>`; otherwise `## Active Plan` stays `Not verified`. The session todo list is used for `## TaskList Summary`.
+- The deterministic default backend records observable facts; semantic synthesis (decisions, rationale) requires a configured LLM backend.
 
 ## 4. Compaction Capability Comparison
 
@@ -205,6 +238,7 @@ compact-plus owns the following environment variables:
 | `COMPACT_PLUS_SQUASH_BASH_CHARS` | Bash output squash threshold |
 | `COMPACT_PLUS_TWO_PASS` | Two-pass critique toggle |
 | `COMPACT_PLUS_CODEX_WARN_THRESHOLD` | Codex effective context usage notification threshold; default `75` |
+| `COMPACT_PLUS_OPENCODE_WARN_THRESHOLD` | OpenCode context usage notification threshold; default `75` |
 
 The base repository owns Claude's `COMPACT_WARN_THRESHOLD`, because the producer is `home/hooks/claude/statusline.sh`. The two threshold settings are independent.
 
